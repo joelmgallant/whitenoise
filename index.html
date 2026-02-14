@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Noise Generator</title>
+<style>
+  /* ── Reset ── */
+  *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+  /* ── Base page: dark, no scrolling, system font ── */
+  body {
+    overflow: hidden;
+    background: #111;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    color: #e0e0e0;
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /* ── Full-screen canvas behind everything ── */
+  canvas {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+  }
+
+  /* ── Centered control panel (glassmorphism overlay) ── */
+  #controls {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 24px;
+    padding: 32px 40px;
+    background: rgba(20, 20, 22, 0.75);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-radius: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    z-index: 10;
+    transition: opacity 0.3s ease, transform 0.3s ease;
+  }
+  /* When minimized: fade out and shrink, disable clicks */
+  #controls.hidden {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.92);
+    pointer-events: none;
+  }
+
+  /* ── Minimize button (top-right of panel) ── */
+  #minimize-btn {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(255, 255, 255, 0.04);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s;
+  }
+  #minimize-btn:hover { background: rgba(255, 255, 255, 0.1); }
+  #minimize-btn svg { width: 14px; height: 14px; fill: rgba(255, 255, 255, 0.5); }
+
+  /* ── Restore button (bottom-right corner, only visible when panel is minimized) ── */
+  #restore-btn {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    background: rgba(20, 20, 22, 0.7);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    transition: opacity 0.3s ease, transform 0.3s ease, background 0.2s;
+    /* Hidden by default */
+    opacity: 0;
+    transform: scale(0.8);
+    pointer-events: none;
+  }
+  #restore-btn.visible {
+    opacity: 1;
+    transform: scale(1);
+    pointer-events: auto;
+  }
+  #restore-btn:hover { background: rgba(255, 255, 255, 0.1); }
+  #restore-btn svg { width: 22px; height: 22px; fill: rgba(255, 255, 255, 0.6); }
+
+  /* ── Play / Pause circular button ── */
+  #play-btn {
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.05);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s, border-color 0.2s, transform 0.15s;
+  }
+  #play-btn:hover {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.25);
+  }
+  #play-btn:active { transform: scale(0.94); }
+  #play-btn svg { width: 28px; height: 28px; fill: #e0e0e0; }
+
+  /* ── Section labels ("AUDIO", "VISUALS") ── */
+  .section-label {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    color: rgba(255, 255, 255, 0.3);
+    align-self: flex-start;
+    /* Pull up into the gap above the next row */
+    margin-bottom: -16px;
+  }
+
+  /* ── Labeled slider row (label — slider) ── */
+  .slider-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+  }
+  .slider-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.5);
+    width: 56px;
+    flex-shrink: 0;
+    text-align: right;
+  }
+
+  /* ── Custom range slider styling ── */
+  input[type="range"] {
+    -webkit-appearance: none;
+    appearance: none;
+    flex: 1;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.12);
+    outline: none;
+    cursor: pointer;
+  }
+  input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #e0e0e0;
+    border: none;
+    transition: transform 0.15s;
+  }
+  input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.2); }
+  input[type="range"]::-moz-range-thumb {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #e0e0e0;
+    border: none;
+  }
+</style>
+</head>
+<body>
+
+<!-- Full-viewport canvas for visual effects (TV static, particles, spiral) -->
+<canvas id="canvas"></canvas>
+
+<!-- ── Main control panel ── -->
+<div id="controls">
+  <!-- Minimize: collapses panel to a corner icon -->
+  <button id="minimize-btn" aria-label="Minimize">
+    <svg viewBox="0 0 24 24"><path d="M19 13H5v-2h14v2z"/></svg>
+  </button>
+
+  <!-- Play / Pause toggle -->
+  <button id="play-btn" aria-label="Play">
+    <svg id="icon-play" viewBox="0 0 24 24"><polygon points="6,3 20,12 6,21"/></svg>
+    <svg id="icon-pause" viewBox="0 0 24 24" style="display:none">
+      <rect x="5" y="3" width="4" height="18" rx="1"/>
+      <rect x="15" y="3" width="4" height="18" rx="1"/>
+    </svg>
+  </button>
+
+  <!-- Audio: separate volume sliders for each noise type -->
+  <span class="section-label">Audio</span>
+  <div class="slider-row">
+    <span class="slider-label">White</span>
+    <input type="range" id="white-vol" min="0" max="1" step="0.01" value="0.5">
+  </div>
+  <div class="slider-row">
+    <span class="slider-label">Brown</span>
+    <input type="range" id="brown-vol" min="0" max="1" step="0.01" value="0">
+  </div>
+
+  <!-- Visual layer opacity sliders: 0 = off, slide up for more intensity -->
+  <span class="section-label">Visuals</span>
+  <div class="slider-row">
+    <span class="slider-label">Static</span>
+    <input type="range" id="static-level" min="0" max="1" step="0.01" value="1">
+  </div>
+  <div class="slider-row">
+    <span class="slider-label">Particles</span>
+    <input type="range" id="particle-level" min="0" max="1" step="0.01" value="0">
+  </div>
+  <div class="slider-row">
+    <span class="slider-label">Spiral</span>
+    <input type="range" id="spiral-level" min="0" max="1" step="0.01" value="0">
+  </div>
+  <div class="slider-row">
+    <span class="slider-label">Spin</span>
+    <input type="range" id="spiral-speed" min="-0.04" max="0.04" step="0.001" value="0.008">
+  </div>
+</div>
+
+<!-- Floating restore button — appears in bottom-right when panel is minimized -->
+<button id="restore-btn" aria-label="Show controls">
+  <svg viewBox="0 0 24 24"><path d="M12 8V4l8 8-8 8v-4H4V8h8z"/></svg>
+</button>
+
+<script>
+// ════════════════════════════════════════════════════════
+//  APPLICATION STATE
+// ════════════════════════════════════════════════════════
+const state = {
+  playing: false,           // Whether audio is currently playing
+  whiteVolume: 0.5,         // White noise volume (0–1), controlled by its own slider
+  brownVolume: 0,           // Brown noise volume (0–1), controlled by its own slider
+  // Visual layer opacity levels (0–1), controlled by individual sliders
+  staticLevel: 1,
+  particleLevel: 0,
+  spiralLevel: 0,
+  // Current opacities (lerped smoothly toward 0 or 1)
+  staticOpacity: 0,
+  particleOpacity: 0,
+  spiralOpacity: 0,
+  // Spiral rotation angle (accumulates over time)
+  spiralAngle: 0,
+  // Spiral rotation speed in radians/frame — negative = reverse direction
+  spiralSpeed: 0.008,
+};
+
+// ════════════════════════════════════════════════════════
+//  AUDIO ENGINE (Web Audio API)
+//
+//  Architecture:
+//    whiteSource → whiteGain → destination
+//    brownSource → brownGain → destination
+//
+//  Each noise type has its own gain node controlled by
+//  a dedicated slider. Both sources always run; volume
+//  at 0 means silence. Slide both up for combined noise.
+// ════════════════════════════════════════════════════════
+let audioCtx = null;
+let whiteGain = null;
+let brownGain = null;
+
+const RAMP_TIME = 0.05; // seconds — short ramp to avoid audio clicks on slider moves
+
+// ── AudioWorklet processor code (runs on audio thread) ──
+// Embedded as a string and loaded via blob URL so everything stays in one file.
+// Two processors: white noise (uniform random) and brown noise (integrated random walk).
+const workletCode = `
+class WhiteNoiseProcessor extends AudioWorkletProcessor {
+  process(inputs, outputs) {
+    const ch = outputs[0][0];
+    for (let i = 0; i < ch.length; i++) {
+      ch[i] = Math.random() * 2 - 1;
+    }
+    return true;
+  }
+}
+registerProcessor('white-noise', WhiteNoiseProcessor);
+
+class BrownNoiseProcessor extends AudioWorkletProcessor {
+  constructor() {
+    super();
+    this.last = 0;
+  }
+  process(inputs, outputs) {
+    const ch = outputs[0][0];
+    for (let i = 0; i < ch.length; i++) {
+      this.last += (Math.random() * 2 - 1) * 0.02;
+      if (this.last > 1) this.last = 1;
+      if (this.last < -1) this.last = -1;
+      ch[i] = this.last;
+    }
+    return true;
+  }
+}
+registerProcessor('brown-noise', BrownNoiseProcessor);
+`;
+
+/**
+ * Initialize the Web Audio graph using AudioWorklet for real-time noise generation.
+ * No pre-rendered buffers, no loops, no seams — fresh samples every audio frame.
+ * Returns a promise (audioWorklet.addModule is async).
+ */
+async function initAudio() {
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  // Load worklet processors from inline code via blob URL
+  const blob = new Blob([workletCode], { type: 'application/javascript' });
+  const url = URL.createObjectURL(blob);
+  await audioCtx.audioWorklet.addModule(url);
+  URL.revokeObjectURL(url);
+
+  // Create gain nodes — one per noise type, routed directly to output
+  whiteGain = audioCtx.createGain();
+  brownGain = audioCtx.createGain();
+  whiteGain.gain.value = state.whiteVolume;
+  brownGain.gain.value = state.brownVolume;
+  whiteGain.connect(audioCtx.destination);
+  brownGain.connect(audioCtx.destination);
+
+  // Create worklet nodes — these generate noise in real-time on the audio thread
+  const whiteNode = new AudioWorkletNode(audioCtx, 'white-noise');
+  const brownNode = new AudioWorkletNode(audioCtx, 'brown-noise');
+  whiteNode.connect(whiteGain);
+  brownNode.connect(brownGain);
+}
+
+// ════════════════════════════════════════════════════════
+//  CANVAS VISUALS
+//
+//  Three independent visual layers rendered on a single canvas:
+//    1. TV Static — random grayscale pixels (ImageData)
+//    2. Particles — brownian-motion drifting circles, warm earth tones
+//    3. Spiral   — hypnotic rotating spiral overlay
+//
+//  Each layer has its own opacity, lerped smoothly toward
+//  a target based on its toggle state.
+// ════════════════════════════════════════════════════════
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+/** Keep canvas dimensions matched to viewport */
+function resize() {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+window.addEventListener('resize', resize);
+resize();
+
+// ── Static noise rendering state ──
+// Temp canvas + context are created once and resized only when viewport changes
+let staticImgData = null;
+let staticTmpCanvas = null;
+let staticTmpCtx = null;
+let staticU32 = null;       // Uint32Array view of ImageData for fast single-write fills
+let staticFrameCount = 0;   // Counter for throttling static updates
+
+// Downscale factor — each "static pixel" is 4x4 screen pixels (16x fewer pixels than 1:1)
+const STATIC_SCALE = 4;
+// Only regenerate static pixels every N frames (~20fps at 60fps display)
+const STATIC_FRAME_SKIP = 3;
+
+/** Rebuild static buffers when viewport size changes */
+function initStaticBuffers() {
+  const sw = Math.ceil(canvas.width / STATIC_SCALE);
+  const sh = Math.ceil(canvas.height / STATIC_SCALE);
+  staticImgData = ctx.createImageData(sw, sh);
+  staticU32 = new Uint32Array(staticImgData.data.buffer);
+  if (!staticTmpCanvas) {
+    staticTmpCanvas = document.createElement('canvas');
+    staticTmpCtx = staticTmpCanvas.getContext('2d');
+  }
+  staticTmpCanvas.width = sw;
+  staticTmpCanvas.height = sh;
+}
+
+// ── Particle system setup ──
+const PARTICLE_COUNT = 200;
+const particles = [];
+
+/** Create (or recreate on resize) the particle array with random positions */
+function initParticles() {
+  particles.length = 0;
+  for (let i = 0; i < PARTICLE_COUNT; i++) {
+    // Pre-compute hsl values and cache the color string to avoid
+    // creating a new template string every frame per particle
+    const hue = 20 + Math.random() * 25;       // warm earth tones (oranges/browns)
+    const lightness = 25 + Math.random() * 20;
+    const alpha = 0.15 + Math.random() * 0.25;
+    particles.push({
+      x: Math.random() * canvas.width,          // position
+      y: Math.random() * canvas.height,
+      s: 3 + Math.random() * 5,                 // size (side length for fillRect)
+      vx: 0,                                    // velocity (updated via brownian motion)
+      vy: 0,
+      color: `hsla(${hue}, 40%, ${lightness}%, ${alpha})`, // cached color string
+    });
+  }
+}
+
+// ── Spiral config ──
+const SPIRAL_ARMS = 6;          // Number of spiral arms
+// Spiral speed is now in state.spiralSpeed (controlled by slider, negative = reverse)
+const SPIRAL_TIGHTNESS = 0.12;  // How tightly wound the spiral is (lower = tighter)
+
+// ── Pre-rendered spiral offscreen canvas ──
+// The spiral pattern is static (only rotation changes), so we render it once
+// to an offscreen canvas and just drawImage with rotation each frame.
+// This turns ~3000 arc+fill calls into a single drawImage per frame.
+let spiralCanvas = null;
+let spiralCtx = null;
+let spiralSize = 0;            // Side length of the square offscreen canvas
+
+/** Render the spiral pattern to the offscreen canvas. Called on init and resize. */
+function renderSpiralTexture() {
+  const cw = canvas.width;
+  const ch = canvas.height;
+  // Size must cover the full diagonal so rotation never shows gaps
+  spiralSize = Math.ceil(Math.sqrt(cw * cw + ch * ch));
+  if (!spiralCanvas) {
+    spiralCanvas = document.createElement('canvas');
+    spiralCtx = spiralCanvas.getContext('2d');
+  }
+  spiralCanvas.width = spiralSize;
+  spiralCanvas.height = spiralSize;
+
+  const cx = spiralSize / 2;
+  const cy = spiralSize / 2;
+  const maxR = spiralSize / 2;
+  const ringStep = 4;
+  const segCount = SPIRAL_ARMS * 2;
+  const segAngle = (Math.PI * 2) / segCount;
+
+  // Draw concentric rings with alternating spiral arm colors
+  for (let r = maxR; r > 0; r -= ringStep) {
+    const angOffset = Math.log(r + 1) / SPIRAL_TIGHTNESS;
+    for (let s = 0; s < segCount; s++) {
+      const a1 = s * segAngle;
+      const a2 = a1 + segAngle;
+      const brightness = (s % 2 === 0) ? 18 : 8;
+      const hue = 260 + (r / maxR) * 40;
+
+      spiralCtx.beginPath();
+      spiralCtx.arc(cx, cy, r, a1 + angOffset, a2 + angOffset);
+      spiralCtx.arc(cx, cy, Math.max(0, r - ringStep), a2 + angOffset, a1 + angOffset, true);
+      spiralCtx.closePath();
+      spiralCtx.fillStyle = `hsl(${hue}, 30%, ${brightness}%)`;
+      spiralCtx.fill();
+    }
+  }
+}
+
+/**
+ * Draw TV-static grain effect.
+ * Uses a heavily downscaled buffer (4x) with Uint32Array for fast pixel fills.
+ * Only regenerates pixel data every STATIC_FRAME_SKIP frames to reduce CPU work.
+ * Nearest-neighbor scaling gives chunky CRT pixel look.
+ */
+function drawStatic(opacity) {
+  if (opacity <= 0) return;
+
+  const sw = staticImgData.width;
+  const sh = staticImgData.height;
+
+  // Only regenerate random pixels periodically (static looks random anyway)
+  if (++staticFrameCount >= STATIC_FRAME_SKIP) {
+    staticFrameCount = 0;
+    const a = Math.round(opacity * 255);
+    const pixelCount = sw * sh;
+    // Use Uint32Array for single 32-bit write per pixel (ABGR byte order on little-endian)
+    const alphaBits = a << 24;
+    for (let i = 0; i < pixelCount; i++) {
+      const v = (Math.random() * 255) | 0;
+      staticU32[i] = alphaBits | (v << 16) | (v << 8) | v; // ABGR: alpha | B | G | R
+    }
+    // Write to temp canvas (only re-created on resize, not every frame)
+    staticTmpCtx.putImageData(staticImgData, 0, 0);
+  }
+
+  // Scale the small buffer up to full canvas size (nearest-neighbor for crisp pixels)
+  ctx.save();
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(staticTmpCanvas, 0, 0, canvas.width, canvas.height);
+  ctx.restore();
+}
+
+/**
+ * Draw particle system with brownian motion.
+ * Uses fillRect instead of arc() for better performance (no path creation).
+ * Color strings are pre-cached per particle to avoid template string allocation.
+ */
+function drawParticles(opacity) {
+  if (opacity <= 0) return;
+  ctx.save();
+  ctx.globalAlpha = opacity;
+
+  const cw = canvas.width;
+  const ch = canvas.height;
+
+  for (let i = 0; i < PARTICLE_COUNT; i++) {
+    const p = particles[i];
+    // Brownian motion: random velocity nudge + damping
+    p.vx += (Math.random() - 0.5) * 0.3;
+    p.vy += (Math.random() - 0.5) * 0.3;
+    p.vx *= 0.98; // friction / damping
+    p.vy *= 0.98;
+    p.x += p.vx;
+    p.y += p.vy;
+
+    // Wrap around screen edges
+    if (p.x < -10) p.x = cw + 10;
+    else if (p.x > cw + 10) p.x = -10;
+    if (p.y < -10) p.y = ch + 10;
+    else if (p.y > ch + 10) p.y = -10;
+
+    // Draw as rectangle (much faster than arc — no path setup)
+    ctx.fillStyle = p.color;
+    ctx.fillRect(p.x, p.y, p.s, p.s);
+  }
+
+  ctx.restore();
+}
+
+/**
+ * Draw the hypnotic spiral by rotating and stamping the pre-rendered texture.
+ * The spiral pattern was rendered once to spiralCanvas — this function just
+ * translates to center, rotates by the current angle, and draws. One drawImage
+ * call instead of thousands of arc+fill calls.
+ */
+function drawSpiral(opacity) {
+  if (opacity <= 0) return;
+
+  // Advance rotation (speed and direction from state, controlled by slider)
+  state.spiralAngle += state.spiralSpeed;
+
+  ctx.save();
+  ctx.globalAlpha = opacity;
+  // Translate to screen center, rotate, then draw the texture centered
+  ctx.translate(canvas.width / 2, canvas.height / 2);
+  ctx.rotate(state.spiralAngle);
+  ctx.drawImage(spiralCanvas, -spiralSize / 2, -spiralSize / 2);
+  ctx.restore();
+}
+
+// Initialize all visual buffers (must come after all declarations above)
+initStaticBuffers();
+initParticles();
+renderSpiralTexture();
+window.addEventListener('resize', () => { initStaticBuffers(); initParticles(); renderSpiralTexture(); });
+
+// ── Animation loop ──
+// Visual opacity is lerped each frame toward the target for smooth transitions
+const VISUAL_LERP = 0.06; // Higher = faster transition
+
+let animFrameId = null; // Tracks the current rAF request so we can cancel it
+
+/** Lerp a value toward a target, snapping when close enough */
+function lerpSnap(current, target) {
+  const next = current + (target - current) * VISUAL_LERP;
+  return Math.abs(next - target) < 0.002 ? target : next;
+}
+
+function frame() {
+  // Target opacities: directly from slider levels
+  const targetStatic = state.staticLevel;
+  const targetParticle = state.particleLevel;
+  const targetSpiral = state.spiralLevel;
+
+  // Smooth lerp toward targets
+  state.staticOpacity = lerpSnap(state.staticOpacity, targetStatic);
+  state.particleOpacity = lerpSnap(state.particleOpacity, targetParticle);
+  state.spiralOpacity = lerpSnap(state.spiralOpacity, targetSpiral);
+
+  // Fill dark background
+  ctx.fillStyle = '#111';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+  // Draw visual layers (each skips internally if opacity is 0)
+  drawSpiral(state.spiralOpacity);   // spiral behind static/particles
+  drawStatic(state.staticOpacity);
+  drawParticles(state.particleOpacity);
+
+  // Keep looping only while playing
+  animFrameId = requestAnimationFrame(frame);
+}
+
+/** Start the render loop (no-op if already running) */
+function startRendering() {
+  if (animFrameId !== null) return;
+  animFrameId = requestAnimationFrame(frame);
+}
+
+/** Stop the render loop and paint a static dark frame */
+function stopRendering() {
+  if (animFrameId !== null) {
+    cancelAnimationFrame(animFrameId);
+    animFrameId = null;
+  }
+  // Paint a clean dark frame so the screen isn't frozen on the last noise frame
+  state.staticOpacity = 0;
+  state.particleOpacity = 0;
+  state.spiralOpacity = 0;
+  ctx.fillStyle = '#111';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+// ════════════════════════════════════════════════════════
+//  UI EVENT WIRING
+// ════════════════════════════════════════════════════════
+const playBtn = document.getElementById('play-btn');
+const iconPlay = document.getElementById('icon-play');
+const iconPause = document.getElementById('icon-pause');
+const whiteVolSlider = document.getElementById('white-vol');
+const brownVolSlider = document.getElementById('brown-vol');
+const staticLevelSlider = document.getElementById('static-level');
+const particleLevelSlider = document.getElementById('particle-level');
+const spiralLevelSlider = document.getElementById('spiral-level');
+const spiralSpeedSlider = document.getElementById('spiral-speed');
+const controlsPanel = document.getElementById('controls');
+const minimizeBtn = document.getElementById('minimize-btn');
+const restoreBtn = document.getElementById('restore-btn');
+
+// ── Sync state from DOM on load ──
+// Browsers restore slider values from autocomplete on reload, but state
+// still has hardcoded defaults. Read the actual DOM values so everything matches.
+state.whiteVolume = parseFloat(whiteVolSlider.value);
+state.brownVolume = parseFloat(brownVolSlider.value);
+state.staticLevel = parseFloat(staticLevelSlider.value);
+state.particleLevel = parseFloat(particleLevelSlider.value);
+state.spiralLevel = parseFloat(spiralLevelSlider.value);
+state.spiralSpeed = parseFloat(spiralSpeedSlider.value);
+
+/** Toggle play/pause icon to match current state */
+function updatePlayIcon() {
+  iconPlay.style.display = state.playing ? 'none' : 'block';
+  iconPause.style.display = state.playing ? 'block' : 'none';
+  playBtn.setAttribute('aria-label', state.playing ? 'Pause' : 'Play');
+}
+
+// ── Play / Pause ──
+// First click lazily initializes the AudioContext (required by browsers:
+// AudioContext can only be created/resumed after a user gesture).
+playBtn.addEventListener('click', async () => {
+  if (!audioCtx) await initAudio();
+
+  if (state.playing) {
+    audioCtx.suspend();
+    state.playing = false;
+    stopRendering();
+  } else {
+    audioCtx.resume();
+    state.playing = true;
+    startRendering();
+  }
+  updatePlayIcon();
+});
+
+// ── White noise volume slider ──
+// Smoothly ramps the gain over 50ms to avoid audio clicks
+whiteVolSlider.addEventListener('input', () => {
+  state.whiteVolume = parseFloat(whiteVolSlider.value);
+  if (whiteGain) {
+    whiteGain.gain.linearRampToValueAtTime(state.whiteVolume, audioCtx.currentTime + RAMP_TIME);
+  }
+});
+
+// ── Brown noise volume slider ──
+brownVolSlider.addEventListener('input', () => {
+  state.brownVolume = parseFloat(brownVolSlider.value);
+  if (brownGain) {
+    brownGain.gain.linearRampToValueAtTime(state.brownVolume, audioCtx.currentTime + RAMP_TIME);
+  }
+});
+
+// ── Visual layer opacity sliders ──
+// Each slider directly controls its layer's target opacity (0 = off, 1 = full)
+staticLevelSlider.addEventListener('input', () => {
+  state.staticLevel = parseFloat(staticLevelSlider.value);
+});
+particleLevelSlider.addEventListener('input', () => {
+  state.particleLevel = parseFloat(particleLevelSlider.value);
+});
+spiralLevelSlider.addEventListener('input', () => {
+  state.spiralLevel = parseFloat(spiralLevelSlider.value);
+});
+// ── Spiral speed slider ──
+// Negative values = reverse rotation, zero = stopped, positive = forward
+spiralSpeedSlider.addEventListener('input', () => {
+  state.spiralSpeed = parseFloat(spiralSpeedSlider.value);
+});
+
+// ── Spacebar play/pause ──
+// Trigger play/pause from keyboard. Ignore if user is focused on a slider
+// (dragging a range input) to avoid accidental toggling.
+document.addEventListener('keydown', (e) => {
+  if (e.target.tagName === 'INPUT') return;
+  if (e.code === 'Space') {
+    e.preventDefault();
+    playBtn.click();
+  }
+  // 'C' key toggles control panel visibility
+  if (e.code === 'KeyC') {
+    const isHidden = controlsPanel.classList.toggle('hidden');
+    restoreBtn.classList.toggle('visible', isHidden);
+  }
+});
+
+// ── Minimize / Restore controls ──
+// Minimize: hides the center panel, shows a small restore icon in the corner
+minimizeBtn.addEventListener('click', () => {
+  controlsPanel.classList.add('hidden');
+  restoreBtn.classList.add('visible');
+});
+
+// Restore: brings the panel back, hides the corner icon
+restoreBtn.addEventListener('click', () => {
+  controlsPanel.classList.remove('hidden');
+  restoreBtn.classList.remove('visible');
+});
+</script>
+</body>
+</html>
