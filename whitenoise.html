@@ -276,6 +276,13 @@ let whiteGain = null;
 let brownGain = null;
 
 const RAMP_TIME = 0.05; // seconds — short ramp to avoid audio clicks on slider moves
+const MAX_VOLUME = 0.3;  // cap overall volume — raw 1.0 is way too loud
+
+/** Map a linear 0–1 slider value to an exponential 0–MAX_VOLUME curve.
+ *  Attempt #1: x^2 scaling gives finer control at low volumes. */
+function sliderToGain(v) {
+  return v * v * MAX_VOLUME;
+}
 
 // ── AudioWorklet processor code (runs on audio thread) ──
 // Embedded as a string and loaded via blob URL so everything stays in one file.
@@ -328,8 +335,8 @@ async function initAudio() {
   // Create gain nodes — one per noise type, routed directly to output
   whiteGain = audioCtx.createGain();
   brownGain = audioCtx.createGain();
-  whiteGain.gain.value = state.whiteVolume;
-  brownGain.gain.value = state.brownVolume;
+  whiteGain.gain.value = sliderToGain(state.whiteVolume);
+  brownGain.gain.value = sliderToGain(state.brownVolume);
   whiteGain.connect(audioCtx.destination);
   brownGain.connect(audioCtx.destination);
 
@@ -675,7 +682,7 @@ playBtn.addEventListener('click', async () => {
 whiteVolSlider.addEventListener('input', () => {
   state.whiteVolume = parseFloat(whiteVolSlider.value);
   if (whiteGain) {
-    whiteGain.gain.linearRampToValueAtTime(state.whiteVolume, audioCtx.currentTime + RAMP_TIME);
+    whiteGain.gain.linearRampToValueAtTime(sliderToGain(state.whiteVolume), audioCtx.currentTime + RAMP_TIME);
   }
 });
 
@@ -683,7 +690,7 @@ whiteVolSlider.addEventListener('input', () => {
 brownVolSlider.addEventListener('input', () => {
   state.brownVolume = parseFloat(brownVolSlider.value);
   if (brownGain) {
-    brownGain.gain.linearRampToValueAtTime(state.brownVolume, audioCtx.currentTime + RAMP_TIME);
+    brownGain.gain.linearRampToValueAtTime(sliderToGain(state.brownVolume), audioCtx.currentTime + RAMP_TIME);
   }
 });
 
