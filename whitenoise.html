@@ -212,6 +212,10 @@
     <span class="slider-label">Brown</span>
     <input type="range" id="brown-vol" min="0" max="1" step="0.01" value="0">
   </div>
+  <div class="slider-row">
+    <span class="slider-label">Tinnitus</span>
+    <input type="range" id="tinnitus-vol" min="0" max="1" step="0.01" value="0">
+  </div>
 
   <!-- Visual layer opacity sliders: 0 = off, slide up for more intensity -->
   <span class="section-label">Visuals</span>
@@ -246,6 +250,7 @@ const state = {
   playing: false,           // Whether audio is currently playing
   whiteVolume: 0.5,         // White noise volume (0–1), controlled by its own slider
   brownVolume: 0,           // Brown noise volume (0–1), controlled by its own slider
+  tinnitusVolume: 0,        // 4500 Hz tinnitus tone volume (0–1), controlled by its own slider
   // Visual layer opacity levels (0–1), controlled by individual sliders
   staticLevel: 1,
   particleLevel: 0,
@@ -274,6 +279,7 @@ const state = {
 let audioCtx = null;
 let whiteGain = null;
 let brownGain = null;
+let tinnitusGain = null;
 
 const RAMP_TIME = 0.05; // seconds — short ramp to avoid audio clicks on slider moves
 const MAX_VOLUME = 0.3;  // cap overall volume — raw 1.0 is way too loud
@@ -282,6 +288,22 @@ const MAX_VOLUME = 0.3;  // cap overall volume — raw 1.0 is way too loud
  *  Attempt #1: x^2 scaling gives finer control at low volumes. */
 function sliderToGain(v) {
   return v * v * MAX_VOLUME;
+}
+
+/** Create a low-frequency oscillator that modulates a target AudioParam.
+ *  @param {AudioContext} ctx  - audio context
+ *  @param {number} rate       - LFO frequency in Hz
+ *  @param {number} depth      - modulation depth (peak deviation in target's units)
+ *  @param {AudioParam} target - the AudioParam to modulate (e.g. oscillator.frequency) */
+function createLFO(ctx, rate, depth, target) {
+  const lfo = ctx.createOscillator();
+  lfo.type = 'sine';
+  lfo.frequency.value = rate;
+  const lfoGain = ctx.createGain();
+  lfoGain.gain.value = depth;
+  lfo.connect(lfoGain);
+  lfoGain.connect(target);
+  lfo.start();
 }
 
 // ── AudioWorklet processor code (runs on audio thread) ──
@@ -335,16 +357,26 @@ async function initAudio() {
   // Create gain nodes — one per noise type, routed directly to output
   whiteGain = audioCtx.createGain();
   brownGain = audioCtx.createGain();
+  tinnitusGain = audioCtx.createGain();
   whiteGain.gain.value = sliderToGain(state.whiteVolume);
   brownGain.gain.value = sliderToGain(state.brownVolume);
+  tinnitusGain.gain.value = sliderToGain(state.tinnitusVolume);
   whiteGain.connect(audioCtx.destination);
   brownGain.connect(audioCtx.destination);
+  tinnitusGain.connect(audioCtx.destination);
 
   // Create worklet nodes — these generate noise in real-time on the audio thread
   const whiteNode = new AudioWorkletNode(audioCtx, 'white-noise');
   const brownNode = new AudioWorkletNode(audioCtx, 'brown-noise');
   whiteNode.connect(whiteGain);
   brownNode.connect(brownGain);
+
+  // Create 4500 Hz sine oscillator for tinnitus tone
+  const tinnitusOsc = audioCtx.createOscillator();
+  tinnitusOsc.type = 'sine';
+  tinnitusOsc.frequency.value = 4500;
+  tinnitusOsc.connect(tinnitusGain);
+  tinnitusOsc.start();
 }
 
 // ════════════════════════════════════════════════════════
@@ -634,6 +666,7 @@ const iconPlay = document.getElementById('icon-play');
 const iconPause = document.getElementById('icon-pause');
 const whiteVolSlider = document.getElementById('white-vol');
 const brownVolSlider = document.getElementById('brown-vol');
+const tinnitusVolSlider = document.getElementById('tinnitus-vol');
 const staticLevelSlider = document.getElementById('static-level');
 const particleLevelSlider = document.getElementById('particle-level');
 const spiralLevelSlider = document.getElementById('spiral-level');
@@ -647,6 +680,7 @@ const restoreBtn = document.getElementById('restore-btn');
 // still has hardcoded defaults. Read the actual DOM values so everything matches.
 state.whiteVolume = parseFloat(whiteVolSlider.value);
 state.brownVolume = parseFloat(brownVolSlider.value);
+state.tinnitusVolume = parseFloat(tinnitusVolSlider.value);
 state.staticLevel = parseFloat(staticLevelSlider.value);
 state.particleLevel = parseFloat(particleLevelSlider.value);
 state.spiralLevel = parseFloat(spiralLevelSlider.value);
@@ -691,6 +725,14 @@ brownVolSlider.addEventListener('input', () => {
   state.brownVolume = parseFloat(brownVolSlider.value);
   if (brownGain) {
     brownGain.gain.linearRampToValueAtTime(sliderToGain(state.brownVolume), audioCtx.currentTime + RAMP_TIME);
+  }
+});
+
+// ── Tinnitus tone volume slider ──
+tinnitusVolSlider.addEventListener('input', () => {
+  state.tinnitusVolume = parseFloat(tinnitusVolSlider.value);
+  if (tinnitusGain) {
+    tinnitusGain.gain.linearRampToValueAtTime(sliderToGain(state.tinnitusVolume), audioCtx.currentTime + RAMP_TIME);
   }
 });
 
