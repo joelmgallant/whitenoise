@@ -250,7 +250,7 @@ const state = {
   playing: false,           // Whether audio is currently playing
   whiteVolume: 0.5,         // White noise volume (0–1), controlled by its own slider
   brownVolume: 0,           // Brown noise volume (0–1), controlled by its own slider
-  tinnitusVolume: 0,        // 4500 Hz tinnitus tone volume (0–1), controlled by its own slider
+  tinnitusVolume: 0,        // 4533 Hz shimmer tinnitus tone volume (0–1), controlled by its own slider
   // Visual layer opacity levels (0–1), controlled by individual sliders
   staticLevel: 1,
   particleLevel: 0,
@@ -269,12 +269,17 @@ const state = {
 //  AUDIO ENGINE (Web Audio API)
 //
 //  Architecture:
-//    whiteSource → whiteGain → destination
-//    brownSource → brownGain → destination
+//    whiteSource ──────────────────────────→ whiteGain → destination
+//    brownSource ──────────────────────────→ brownGain → destination
+//    tinnitusOsc (4533 Hz sine carrier) ──→ tinnitusGain → destination
+//      ↑ frequency modulated by:
+//      LFO1 (0.75 Hz, ±50 Hz)  — primary shimmer
+//      LFO2 (1.85 Hz, ±20 Hz)  — fast wobble
+//      LFO3 (0.28 Hz, ±15 Hz)  — slow drift
 //
-//  Each noise type has its own gain node controlled by
-//  a dedicated slider. Both sources always run; volume
-//  at 0 means silence. Slide both up for combined noise.
+//  Each sound type has its own gain node controlled by
+//  a dedicated slider. All sources always run; volume
+//  at 0 means silence.
 // ════════════════════════════════════════════════════════
 let audioCtx = null;
 let whiteGain = null;
@@ -371,11 +376,16 @@ async function initAudio() {
   whiteNode.connect(whiteGain);
   brownNode.connect(brownGain);
 
-  // Create 4500 Hz sine oscillator for tinnitus tone
+  // Create 4533 Hz carrier oscillator with shimmer modulation.
+  // Three LFOs modulate the carrier frequency to produce a shimmering effect
+  // matching analyzed tinnitus relief audio (~4388–4618 Hz swept range).
   const tinnitusOsc = audioCtx.createOscillator();
   tinnitusOsc.type = 'sine';
-  tinnitusOsc.frequency.value = 4500;
+  tinnitusOsc.frequency.value = 4533;
   tinnitusOsc.connect(tinnitusGain);
+  createLFO(audioCtx, 0.75, 50, tinnitusOsc.frequency);  // primary shimmer (1.3s cycle)
+  createLFO(audioCtx, 1.85, 20, tinnitusOsc.frequency);  // fast wobble (0.5s cycle)
+  createLFO(audioCtx, 0.28, 15, tinnitusOsc.frequency);  // slow drift (3.5s cycle)
   tinnitusOsc.start();
 }
 
