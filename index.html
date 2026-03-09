@@ -523,16 +523,16 @@ async function initAudioGraph() {
 
   // Ocean wave amplitude modulation — three LFOs at different rates
   // create organic, non-repeating wave rise-and-fall pattern
-  createLFO(audioCtx, 0.08, 0.6, oceanWaveGain.gain);   // main wave crash (~12s cycle)
-  createLFO(audioCtx, 0.05, 0.3, oceanWaveGain.gain);   // slow swell (~20s cycle)
-  createLFO(audioCtx, 0.12, 0.2, oceanWaveGain.gain);   // smaller overlapping waves (~8s cycle)
+  createLFO(audioCtx, 0.08, 0.3, oceanWaveGain.gain);   // main wave crash (~12s cycle)
+  createLFO(audioCtx, 0.05, 0.15, oceanWaveGain.gain);  // slow swell (~20s cycle)
+  createLFO(audioCtx, 0.12, 0.1, oceanWaveGain.gain);   // smaller overlapping waves (~8s cycle)
 
   // Ocean filter frequency sweep — when LFOs push cutoff up, high frequencies
   // break through for the bright "shhhhh" of a wave crashing on shore.
-  // Between crashes, cutoff drops back to base 800 Hz for muffled rumble.
-  createLFO(audioCtx, 0.08, 800, oceanFilter.frequency);   // main crash brightness (~12s, synced with amplitude)
-  createLFO(audioCtx, 0.05, 400, oceanFilter.frequency);   // slow swell opens filter (~20s)
-  createLFO(audioCtx, 0.15, 200, oceanFilter.frequency);   // quick splash detail (~7s)
+  // Between crashes, cutoff drops back to base for muffled rumble.
+  createLFO(audioCtx, 0.08, 400, oceanFilter.frequency);   // main crash brightness (~12s, synced with amplitude)
+  createLFO(audioCtx, 0.05, 200, oceanFilter.frequency);   // slow swell opens filter (~20s)
+  createLFO(audioCtx, 0.15, 100, oceanFilter.frequency);   // quick splash detail (~7s)
 
   audioInitialized = true;
 }
