@@ -216,6 +216,10 @@
     <span class="slider-label">Tinnitus</span>
     <input type="range" id="tinnitus-vol" min="0" max="1" step="0.01" value="0">
   </div>
+  <div class="slider-row">
+    <span class="slider-label">Ocean</span>
+    <input type="range" id="ocean-vol" min="0" max="1" step="0.01" value="0">
+  </div>
 
   <!-- Visual layer opacity sliders: 0 = off, slide up for more intensity -->
   <span class="section-label">Visuals</span>
@@ -251,6 +255,7 @@ const state = {
   whiteVolume: 0.5,         // White noise volume (0–1), controlled by its own slider
   brownVolume: 0,           // Brown noise volume (0–1), controlled by its own slider
   tinnitusVolume: 0,        // 4533 Hz shimmer tinnitus tone volume (0–1), controlled by its own slider
+  oceanVolume: 0,           // Ocean waves volume (0–1), amplitude-modulated brown noise
   // Visual layer opacity levels (0–1), controlled by individual sliders
   staticLevel: 1,
   particleLevel: 0,
@@ -285,6 +290,8 @@ let audioCtx = null;
 let whiteGain = null;
 let brownGain = null;
 let tinnitusGain = null;
+let oceanGain = null;
+let oceanWaveGain = null;
 let audioInitialized = false; // true once the full audio graph is wired up
 
 const RAMP_TIME = 0.05; // seconds — short ramp to avoid audio clicks on slider moves
@@ -402,7 +409,20 @@ function createScriptProcessorNoise(ctx) {
     }
   };
 
-  return { whiteNode: whiteProc, brownNode: brownProc };
+  // Ocean noise: separate brown noise instance for ocean wave base
+  let oceanLast = 0;
+  const oceanProc = ctx.createScriptProcessor(bufSize, 1, 1);
+  oceanProc.onaudioprocess = (e) => {
+    const ch = e.outputBuffer.getChannelData(0);
+    for (let i = 0; i < ch.length; i++) {
+      oceanLast += (Math.random() * 2 - 1) * 0.02;
+      if (oceanLast > 1) oceanLast = 1;
+      if (oceanLast < -1) oceanLast = -1;
+      ch[i] = oceanLast;
+    }
+  };
+
+  return { whiteNode: whiteProc, brownNode: brownProc, oceanNode: oceanProc };
 }
 
 /**
@@ -450,24 +470,42 @@ async function initAudioGraph() {
   whiteGain = audioCtx.createGain();
   brownGain = audioCtx.createGain();
   tinnitusGain = audioCtx.createGain();
+  oceanGain = audioCtx.createGain();
   whiteGain.gain.value = sliderToGain(state.whiteVolume);
   brownGain.gain.value = sliderToGain(state.brownVolume);
   tinnitusGain.gain.value = sliderToGain(state.tinnitusVolume);
+  oceanGain.gain.value = sliderToGain(state.oceanVolume);
   whiteGain.connect(audioCtx.destination);
   brownGain.connect(audioCtx.destination);
   tinnitusGain.connect(audioCtx.destination);
+  oceanGain.connect(audioCtx.destination);
+
+  // Ocean wave amplitude modulation gain — LFOs swing this between ~0 and ~1
+  oceanWaveGain = audioCtx.createGain();
+  oceanWaveGain.gain.value = 5.0;
+  oceanWaveGain.connect(oceanGain);
+
+  // Lowpass filter for ocean waves — cuts high frequencies for a muffled, rumbly whoosh
+  const oceanFilter = audioCtx.createBiquadFilter();
+  oceanFilter.type = 'lowpass';
+  oceanFilter.frequency.value = 1200;
+  oceanFilter.Q.value = 1.0;
+  oceanFilter.connect(oceanWaveGain);
 
   // Try AudioWorklet (blob URL → data URL), fall back to ScriptProcessorNode
   const workletLoaded = await tryLoadWorklet(audioCtx);
   if (workletLoaded) {
     const whiteNode = new AudioWorkletNode(audioCtx, 'white-noise');
     const brownNode = new AudioWorkletNode(audioCtx, 'brown-noise');
+    const oceanNode = new AudioWorkletNode(audioCtx, 'brown-noise'); // reuse brown noise for ocean base
     whiteNode.connect(whiteGain);
     brownNode.connect(brownGain);
+    oceanNode.connect(oceanFilter);
   } else {
-    const { whiteNode, brownNode } = createScriptProcessorNoise(audioCtx);
+    const { whiteNode, brownNode, oceanNode } = createScriptProcessorNoise(audioCtx);
     whiteNode.connect(whiteGain);
     brownNode.connect(brownGain);
+    oceanNode.connect(oceanFilter);
   }
 
   // Create 4533 Hz carrier oscillator with shimmer modulation.
@@ -481,6 +519,12 @@ async function initAudioGraph() {
   createLFO(audioCtx, 1.85, 20, tinnitusOsc.frequency);  // fast wobble (0.5s cycle)
   createLFO(audioCtx, 0.28, 15, tinnitusOsc.frequency);  // slow drift (3.5s cycle)
   tinnitusOsc.start();
+
+  // Ocean wave amplitude modulation — three LFOs at different rates
+  // create organic, non-repeating wave rise-and-fall pattern
+  createLFO(audioCtx, 0.08, 0.6, oceanWaveGain.gain);   // main wave crash (~12s cycle)
+  createLFO(audioCtx, 0.05, 0.3, oceanWaveGain.gain);   // slow swell (~20s cycle)
+  createLFO(audioCtx, 0.12, 0.2, oceanWaveGain.gain);   // smaller overlapping waves (~8s cycle)
 
   audioInitialized = true;
 }
@@ -773,6 +817,7 @@ const iconPause = document.getElementById('icon-pause');
 const whiteVolSlider = document.getElementById('white-vol');
 const brownVolSlider = document.getElementById('brown-vol');
 const tinnitusVolSlider = document.getElementById('tinnitus-vol');
+const oceanVolSlider = document.getElementById('ocean-vol');
 const staticLevelSlider = document.getElementById('static-level');
 const particleLevelSlider = document.getElementById('particle-level');
 const spiralLevelSlider = document.getElementById('spiral-level');
@@ -787,6 +832,7 @@ const restoreBtn = document.getElementById('restore-btn');
 state.whiteVolume = parseFloat(whiteVolSlider.value);
 state.brownVolume = parseFloat(brownVolSlider.value);
 state.tinnitusVolume = parseFloat(tinnitusVolSlider.value);
+state.oceanVolume = parseFloat(oceanVolSlider.value);
 state.staticLevel = parseFloat(staticLevelSlider.value);
 state.particleLevel = parseFloat(particleLevelSlider.value);
 state.spiralLevel = parseFloat(spiralLevelSlider.value);
@@ -842,6 +888,14 @@ tinnitusVolSlider.addEventListener('input', () => {
   state.tinnitusVolume = parseFloat(tinnitusVolSlider.value);
   if (tinnitusGain) {
     tinnitusGain.gain.linearRampToValueAtTime(sliderToGain(state.tinnitusVolume), audioCtx.currentTime + RAMP_TIME);
+  }
+});
+
+// ── Ocean waves volume slider ──
+oceanVolSlider.addEventListener('input', () => {
+  state.oceanVolume = parseFloat(oceanVolSlider.value);
+  if (oceanGain) {
+    oceanGain.gain.linearRampToValueAtTime(sliderToGain(state.oceanVolume), audioCtx.currentTime + RAMP_TIME);
   }
 });
 

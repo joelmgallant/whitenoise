@@ -18,6 +18,11 @@ tinnitusOsc (OscillatorNode) ──→ tinnitusGain ──→ destination
   LFO1 (0.75 Hz, ±50 Hz)
   LFO2 (1.85 Hz, ±20 Hz)
   LFO3 (0.28 Hz, ±15 Hz)
+oceanSource (AudioWorklet, brown-noise) ──→ lowpass (500 Hz) ──→ oceanWaveGain ──→ oceanGain ──→ destination
+  ↑ gain modulated by:
+  LFO1 (0.08 Hz, ±0.3)   — main wave crash
+  LFO2 (0.05 Hz, ±0.15)  — slow swell
+  LFO3 (0.12 Hz, ±0.1)   — overlapping waves
 ```
 
 - AudioWorklet processors are embedded as a string and loaded via blob URL (keeps everything in one file)
