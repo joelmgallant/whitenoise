@@ -59,3 +59,11 @@ Opacity for each layer is lerped toward its slider target at 0.06/frame.
 
 - Space: play/pause
 - C: toggle control panel visibility
+
+## PWA / Offline
+
+- `manifest.json` — web app manifest (name, icons, theme, display mode)
+- `sw.js` — service worker with stale-while-revalidate caching
+- `icons/` — 192px and 512px PNG app icons
+- App is installable to home screen on iOS and Android
+- Bump `CACHE_NAME` version in `sw.js` when deploying changes
