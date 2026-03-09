@@ -378,7 +378,7 @@ async function initAudio() {
 
   // Create 4533 Hz carrier oscillator with shimmer modulation.
   // Three LFOs modulate the carrier frequency to produce a shimmering effect
-  // matching analyzed tinnitus relief audio (~4388–4618 Hz swept range).
+  // matching analyzed tinnitus relief audio (~4448–4618 Hz swept range).
   const tinnitusOsc = audioCtx.createOscillator();
   tinnitusOsc.type = 'sine';
   tinnitusOsc.frequency.value = 4533;
