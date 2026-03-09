@@ -285,6 +285,7 @@ let audioCtx = null;
 let whiteGain = null;
 let brownGain = null;
 let tinnitusGain = null;
+let audioInitialized = false; // true once the full audio graph is wired up
 
 const RAMP_TIME = 0.05; // seconds — short ramp to avoid audio clicks on slider moves
 const MAX_VOLUME = 0.3;  // cap overall volume — raw 1.0 is way too loud
@@ -379,7 +380,8 @@ function createScriptProcessorNoise(ctx) {
   const bufSize = 4096;
 
   // White noise: uniform random samples
-  const whiteProc = ctx.createScriptProcessor(bufSize, 0, 1);
+  // Use 1 input channel — iOS Safari may not fire onaudioprocess with 0 inputs
+  const whiteProc = ctx.createScriptProcessor(bufSize, 1, 1);
   whiteProc.onaudioprocess = (e) => {
     const ch = e.outputBuffer.getChannelData(0);
     for (let i = 0; i < ch.length; i++) {
@@ -389,7 +391,7 @@ function createScriptProcessorNoise(ctx) {
 
   // Brown noise: integrated random walk with clamping
   let brownLast = 0;
-  const brownProc = ctx.createScriptProcessor(bufSize, 0, 1);
+  const brownProc = ctx.createScriptProcessor(bufSize, 1, 1);
   brownProc.onaudioprocess = (e) => {
     const ch = e.outputBuffer.getChannelData(0);
     for (let i = 0; i < ch.length; i++) {
@@ -404,13 +406,46 @@ function createScriptProcessorNoise(ctx) {
 }
 
 /**
- * Initialize the Web Audio graph. Tries AudioWorklet first (runs on audio thread,
- * no glitches), falls back to ScriptProcessorNode for older browsers / iOS Safari.
- * Returns a promise.
+ * Force iOS Safari into "playback" audio session so audio plays through
+ * media volume instead of ringer volume (unaffected by mute switch).
+ * Uses two complementary approaches:
+ *   1. navigator.audioSession API (Safari 17+)
+ *   2. Silent <audio> element trick (all iOS versions) — playing any
+ *      media element switches iOS from "ambient" to "playback" category
  */
-async function initAudio() {
-  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+function forceMediaAudioSession() {
+  // Modern API (Safari 17+)
+  if (navigator.audioSession) {
+    navigator.audioSession.type = 'playback';
+  }
+  // Silent WAV trick — a 44-byte valid WAV with zero audio samples.
+  // Playing this switches iOS audio session to "playback" mode.
+  const silentWav = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=';
+  const audio = new Audio(silentWav);
+  audio.setAttribute('playsinline', '');
+  audio.play().catch(() => {}); // ignore errors on non-iOS browsers
+}
 
+/**
+ * Create the AudioContext and resume it. Must be called synchronously
+ * within a user gesture handler — iOS Safari revokes audio permission
+ * if resume() happens after an await.
+ */
+function ensureAudioContext() {
+  if (!audioCtx) {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+  // Resume immediately in the synchronous gesture call stack
+  audioCtx.resume();
+  forceMediaAudioSession();
+}
+
+/**
+ * Wire up the full audio graph (gain nodes, noise sources, tinnitus oscillator).
+ * Tries AudioWorklet first, falls back to ScriptProcessorNode.
+ * Called once after the AudioContext is created and resumed.
+ */
+async function initAudioGraph() {
   // Create gain nodes — one per noise type, routed directly to output
   whiteGain = audioCtx.createGain();
   brownGain = audioCtx.createGain();
@@ -446,6 +481,8 @@ async function initAudio() {
   createLFO(audioCtx, 1.85, 20, tinnitusOsc.frequency);  // fast wobble (0.5s cycle)
   createLFO(audioCtx, 0.28, 15, tinnitusOsc.frequency);  // slow drift (3.5s cycle)
   tinnitusOsc.start();
+
+  audioInitialized = true;
 }
 
 // ════════════════════════════════════════════════════════
@@ -763,17 +800,20 @@ function updatePlayIcon() {
 }
 
 // ── Play / Pause ──
-// First click lazily initializes the AudioContext (required by browsers:
-// AudioContext can only be created/resumed after a user gesture).
+// AudioContext creation and resume MUST happen synchronously inside the
+// user gesture handler — iOS Safari revokes audio permission after any await.
+// The async audio graph setup happens after resume is already granted.
 playBtn.addEventListener('click', async () => {
-  if (!audioCtx) await initAudio();
+  // Synchronous: create context + resume + force media volume (before any await!)
+  ensureAudioContext();
 
   if (state.playing) {
     audioCtx.suspend();
     state.playing = false;
     stopRendering();
   } else {
-    audioCtx.resume();
+    // Wire up the audio graph on first play (async but context is already resumed)
+    if (!audioInitialized) await initAudioGraph();
     state.playing = true;
     startRendering();
   }
