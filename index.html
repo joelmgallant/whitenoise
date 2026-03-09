@@ -346,18 +346,70 @@ registerProcessor('brown-noise', BrownNoiseProcessor);
 `;
 
 /**
- * Initialize the Web Audio graph using AudioWorklet for real-time noise generation.
- * No pre-rendered buffers, no loops, no seams — fresh samples every audio frame.
- * Returns a promise (audioWorklet.addModule is async).
+ * Try loading AudioWorklet processors from inline code.
+ * Safari doesn't support blob URLs for audioWorklet.addModule(),
+ * so we try blob URL first, then fall back to data URL.
+ * Returns true if AudioWorklet loaded successfully.
+ */
+async function tryLoadWorklet(ctx) {
+  if (!ctx.audioWorklet) return false;
+  // Try blob URL first (Chrome, Firefox)
+  try {
+    const blob = new Blob([workletCode], { type: 'application/javascript' });
+    const url = URL.createObjectURL(blob);
+    await ctx.audioWorklet.addModule(url);
+    URL.revokeObjectURL(url);
+    return true;
+  } catch (_) { /* blob URL failed, try data URL */ }
+  // Try data URL (Safari 14.1+)
+  try {
+    const dataUrl = 'data:application/javascript,' + encodeURIComponent(workletCode);
+    await ctx.audioWorklet.addModule(dataUrl);
+    return true;
+  } catch (_) { /* data URL also failed */ }
+  return false;
+}
+
+/**
+ * Create noise generators using ScriptProcessorNode (deprecated but universally supported).
+ * Used as fallback when AudioWorklet is unavailable (older iOS Safari).
+ * Same algorithms as the worklet processors above.
+ */
+function createScriptProcessorNoise(ctx) {
+  const bufSize = 4096;
+
+  // White noise: uniform random samples
+  const whiteProc = ctx.createScriptProcessor(bufSize, 0, 1);
+  whiteProc.onaudioprocess = (e) => {
+    const ch = e.outputBuffer.getChannelData(0);
+    for (let i = 0; i < ch.length; i++) {
+      ch[i] = Math.random() * 2 - 1;
+    }
+  };
+
+  // Brown noise: integrated random walk with clamping
+  let brownLast = 0;
+  const brownProc = ctx.createScriptProcessor(bufSize, 0, 1);
+  brownProc.onaudioprocess = (e) => {
+    const ch = e.outputBuffer.getChannelData(0);
+    for (let i = 0; i < ch.length; i++) {
+      brownLast += (Math.random() * 2 - 1) * 0.02;
+      if (brownLast > 1) brownLast = 1;
+      if (brownLast < -1) brownLast = -1;
+      ch[i] = brownLast;
+    }
+  };
+
+  return { whiteNode: whiteProc, brownNode: brownProc };
+}
+
+/**
+ * Initialize the Web Audio graph. Tries AudioWorklet first (runs on audio thread,
+ * no glitches), falls back to ScriptProcessorNode for older browsers / iOS Safari.
+ * Returns a promise.
  */
 async function initAudio() {
   audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-
-  // Load worklet processors from inline code via blob URL
-  const blob = new Blob([workletCode], { type: 'application/javascript' });
-  const url = URL.createObjectURL(blob);
-  await audioCtx.audioWorklet.addModule(url);
-  URL.revokeObjectURL(url);
 
   // Create gain nodes — one per noise type, routed directly to output
   whiteGain = audioCtx.createGain();
@@ -370,11 +422,18 @@ async function initAudio() {
   brownGain.connect(audioCtx.destination);
   tinnitusGain.connect(audioCtx.destination);
 
-  // Create worklet nodes — these generate noise in real-time on the audio thread
-  const whiteNode = new AudioWorkletNode(audioCtx, 'white-noise');
-  const brownNode = new AudioWorkletNode(audioCtx, 'brown-noise');
-  whiteNode.connect(whiteGain);
-  brownNode.connect(brownGain);
+  // Try AudioWorklet (blob URL → data URL), fall back to ScriptProcessorNode
+  const workletLoaded = await tryLoadWorklet(audioCtx);
+  if (workletLoaded) {
+    const whiteNode = new AudioWorkletNode(audioCtx, 'white-noise');
+    const brownNode = new AudioWorkletNode(audioCtx, 'brown-noise');
+    whiteNode.connect(whiteGain);
+    brownNode.connect(brownGain);
+  } else {
+    const { whiteNode, brownNode } = createScriptProcessorNoise(audioCtx);
+    whiteNode.connect(whiteGain);
+    brownNode.connect(brownGain);
+  }
 
   // Create 4533 Hz carrier oscillator with shimmer modulation.
   // Three LFOs modulate the carrier frequency to produce a shimmering effect
