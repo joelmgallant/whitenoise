@@ -66,4 +66,5 @@ Opacity for each layer is lerped toward its slider target at 0.06/frame.
 - `sw.js` — service worker with stale-while-revalidate caching
 - `icons/` — 192px and 512px PNG app icons
 - App is installable to home screen on iOS and Android
-- Bump `CACHE_NAME` version in `sw.js` when deploying changes
+- Cache auto-updates via stale-while-revalidate — no manual version bumping needed
+- Updates are one visit behind: user gets cached version instantly, fresh copy loads next time
