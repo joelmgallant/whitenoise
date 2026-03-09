@@ -140,6 +140,58 @@
     margin-bottom: -16px;
   }
 
+  /* ── Section label row with inline toggle ── */
+  .section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    margin-bottom: -16px;
+  }
+  .section-header .section-label {
+    margin-bottom: 0;
+    align-self: center;
+  }
+
+  /* ── Toggle switch ── */
+  .toggle {
+    position: relative;
+    width: 32px;
+    height: 18px;
+    flex-shrink: 0;
+  }
+  .toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+  .toggle-track {
+    position: absolute;
+    inset: 0;
+    border-radius: 9px;
+    background: rgba(255, 255, 255, 0.1);
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .toggle-track::after {
+    content: '';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.4);
+    transition: transform 0.2s, background 0.2s;
+  }
+  .toggle input:checked + .toggle-track {
+    background: rgba(255, 255, 255, 0.2);
+  }
+  .toggle input:checked + .toggle-track::after {
+    transform: translateX(14px);
+    background: #e0e0e0;
+  }
+
   /* ── Labeled slider row (label — slider) ── */
   .slider-row {
     display: flex;
@@ -227,7 +279,13 @@
   </div>
 
   <!-- Visual layer opacity sliders: 0 = off, slide up for more intensity -->
-  <span class="section-label">Visuals</span>
+  <div class="section-header">
+    <span class="section-label">Visuals</span>
+    <label class="toggle" title="Toggle visuals (V)">
+      <input type="checkbox" id="visuals-toggle" checked>
+      <span class="toggle-track"></span>
+    </label>
+  </div>
   <div class="slider-row">
     <span class="slider-label">Static</span>
     <input type="range" id="static-level" min="0" max="1" step="0.01" value="1">
@@ -273,6 +331,8 @@ const state = {
   spiralAngle: 0,
   // Spiral rotation speed in radians/frame — negative = reverse direction
   spiralSpeed: 0.008,
+  // Whether visuals are enabled (false = skip rendering to save GPU)
+  visualsEnabled: true,
 };
 
 // ════════════════════════════════════════════════════════
@@ -778,6 +838,12 @@ function lerpSnap(current, target) {
 }
 
 function frame() {
+  // If visuals are disabled, don't render — just keep a dark canvas
+  if (!state.visualsEnabled) {
+    animFrameId = null;
+    return;
+  }
+
   // Target opacities: directly from slider levels
   const targetStatic = state.staticLevel;
   const targetParticle = state.particleLevel;
@@ -835,6 +901,7 @@ const staticLevelSlider = document.getElementById('static-level');
 const particleLevelSlider = document.getElementById('particle-level');
 const spiralLevelSlider = document.getElementById('spiral-level');
 const spiralSpeedSlider = document.getElementById('spiral-speed');
+const visualsToggle = document.getElementById('visuals-toggle');
 const controlsPanel = document.getElementById('controls');
 const minimizeBtn = document.getElementById('minimize-btn');
 const restoreBtn = document.getElementById('restore-btn');
@@ -850,6 +917,7 @@ state.staticLevel = parseFloat(staticLevelSlider.value);
 state.particleLevel = parseFloat(particleLevelSlider.value);
 state.spiralLevel = parseFloat(spiralLevelSlider.value);
 state.spiralSpeed = parseFloat(spiralSpeedSlider.value);
+state.visualsEnabled = visualsToggle.checked;
 
 /** Toggle play/pause icon to match current state */
 function updatePlayIcon() {
@@ -929,6 +997,25 @@ spiralSpeedSlider.addEventListener('input', () => {
   state.spiralSpeed = parseFloat(spiralSpeedSlider.value);
 });
 
+// ── Visuals toggle ──
+// When disabled, stops the animation loop entirely to save GPU.
+// Audio continues playing unaffected.
+visualsToggle.addEventListener('change', () => {
+  state.visualsEnabled = visualsToggle.checked;
+  if (state.playing) {
+    if (state.visualsEnabled) {
+      startRendering();
+    } else {
+      // Paint a clean dark frame and stop the loop
+      state.staticOpacity = 0;
+      state.particleOpacity = 0;
+      state.spiralOpacity = 0;
+      ctx.fillStyle = '#111';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    }
+  }
+});
+
 // ── Spacebar play/pause ──
 // Trigger play/pause from keyboard. Ignore if user is focused on a slider
 // (dragging a range input) to avoid accidental toggling.
@@ -937,6 +1024,11 @@ document.addEventListener('keydown', (e) => {
   if (e.code === 'Space') {
     e.preventDefault();
     playBtn.click();
+  }
+  // 'V' key toggles visuals on/off
+  if (e.code === 'KeyV') {
+    visualsToggle.checked = !visualsToggle.checked;
+    visualsToggle.dispatchEvent(new Event('change'));
   }
   // 'C' key toggles control panel visibility
   if (e.code === 'KeyC') {

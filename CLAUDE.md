@@ -58,6 +58,7 @@ Opacity for each layer is lerped toward its slider target at 0.06/frame.
 ## Keyboard Shortcuts
 
 - Space: play/pause
+- V: toggle visuals on/off (saves GPU when disabled)
 - C: toggle control panel visibility
 
 ## PWA / Offline
