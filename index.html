@@ -58,6 +58,15 @@
     pointer-events: none;
   }
 
+  /* ── Version label (bottom of panel) ── */
+  .version-label {
+    font-size: 10px;
+    color: rgba(255, 255, 255, 0.2);
+    letter-spacing: 0.5px;
+    margin-top: -12px;
+    user-select: none;
+  }
+
   /* ── Minimize button (top-right of panel) ── */
   #minimize-btn {
     position: absolute;
@@ -302,6 +311,7 @@
     <span class="slider-label">Spin</span>
     <input type="range" id="spiral-speed" min="-0.04" max="0.04" step="0.001" value="0.008">
   </div>
+  <span class="version-label">v1.0.0</span>
 </div>
 
 <!-- Floating restore button — appears in bottom-right when panel is minimized -->
@@ -341,11 +351,12 @@ const state = {
 //  Architecture:
 //    whiteSource ──────────────────────────→ whiteGain → destination
 //    brownSource ──────────────────────────→ brownGain → destination
-//    tinnitusOsc (4533 Hz sine carrier) ──→ tinnitusGain → destination
-//      ↑ frequency modulated by:
-//      LFO1 (0.75 Hz, ±50 Hz)  — primary shimmer
-//      LFO2 (1.85 Hz, ±20 Hz)  — fast wobble
-//      LFO3 (0.28 Hz, ±15 Hz)  — slow drift
+//    tinnitusOsc × 5 (4414–4652 Hz sines) ──→ perOscGain → tinnitusGain → destination
+//      ↑ each frequency modulated by:
+//      LFO1 (~0.75 Hz, ±70 Hz)  — primary shimmer (rate offset per voice)
+//      LFO2 (~1.85 Hz, ±30 Hz)  — fast wobble
+//      LFO3 (~0.28 Hz, ±20 Hz)  — slow drift
+//      noiseSrc → LPF 2Hz → ±50 Hz  — organic random FM
 //
 //  Each sound type has its own gain node controlled by
 //  a dedicated slider. All sources always run; volume
@@ -574,17 +585,54 @@ async function initAudioGraph() {
     oceanNode.connect(oceanFilter);
   }
 
-  // Create 4533 Hz carrier oscillator with shimmer modulation.
-  // Three LFOs modulate the carrier frequency to produce a shimmering effect
-  // matching analyzed tinnitus relief audio (~4448–4618 Hz swept range).
-  const tinnitusOsc = audioCtx.createOscillator();
-  tinnitusOsc.type = 'sine';
-  tinnitusOsc.frequency.value = 4533;
-  tinnitusOsc.connect(tinnitusGain);
-  createLFO(audioCtx, 0.75, 50, tinnitusOsc.frequency);  // primary shimmer (1.3s cycle)
-  createLFO(audioCtx, 1.85, 20, tinnitusOsc.frequency);  // fast wobble (0.5s cycle)
-  createLFO(audioCtx, 0.28, 15, tinnitusOsc.frequency);  // slow drift (3.5s cycle)
-  tinnitusOsc.start();
+  // ── Tinnitus shimmer: 5 detuned oscillators + LFO + noise FM ──
+  // Matches analyzed tinnitus relief audio characteristics:
+  //   Center: 4533 Hz, -3dB bandwidth: 237 Hz, -10dB bandwidth: 992 Hz
+  //   Chaotic shimmer with ~±170 Hz centroid wandering (not periodic)
+  //
+  // 5 voices spread across the -3dB bandwidth, each independently modulated
+  // by slightly detuned LFOs + lowpass-filtered noise for organic movement.
+  const tinnitusVoices = [4414, 4474, 4533, 4593, 4652]; // span -3dB BW
+
+  // Shared noise buffer for organic FM (10s looped white noise)
+  const noiseBuf = audioCtx.createBuffer(1, audioCtx.sampleRate * 10, audioCtx.sampleRate);
+  const noiseSamples = noiseBuf.getChannelData(0);
+  for (let i = 0; i < noiseSamples.length; i++) noiseSamples[i] = Math.random() * 2 - 1;
+
+  tinnitusVoices.forEach((freq, i) => {
+    const osc = audioCtx.createOscillator();
+    osc.type = 'sine';
+    osc.frequency.value = freq;
+
+    // Per-voice gain (1/N to keep total amplitude consistent)
+    const voiceGain = audioCtx.createGain();
+    voiceGain.gain.value = 1 / tinnitusVoices.length;
+    osc.connect(voiceGain);
+    voiceGain.connect(tinnitusGain);
+
+    // LFOs — wider depths than single-osc version, rate offsets decorrelate voices
+    const rateOff = i * 0.07;
+    createLFO(audioCtx, 0.75 + rateOff, 70, osc.frequency);         // primary shimmer
+    createLFO(audioCtx, 1.85 + rateOff * 0.5, 30, osc.frequency);   // fast wobble
+    createLFO(audioCtx, 0.28 + rateOff * 0.3, 20, osc.frequency);   // slow drift
+
+    // Noise-based FM: white noise → 2 Hz lowpass → ±50 Hz random wandering
+    const noiseSrc = audioCtx.createBufferSource();
+    noiseSrc.buffer = noiseBuf;
+    noiseSrc.loop = true;
+    const noiseLPF = audioCtx.createBiquadFilter();
+    noiseLPF.type = 'lowpass';
+    noiseLPF.frequency.value = 2;
+    noiseLPF.Q.value = 0.5;
+    const noiseScale = audioCtx.createGain();
+    noiseScale.gain.value = 50;
+    noiseSrc.connect(noiseLPF);
+    noiseLPF.connect(noiseScale);
+    noiseScale.connect(osc.frequency);
+    noiseSrc.start(0, i * 1.7); // stagger start offsets to decorrelate voices
+
+    osc.start();
+  });
 
   // Ocean wave amplitude modulation — three LFOs at different rates
   // create organic, non-repeating wave rise-and-fall pattern

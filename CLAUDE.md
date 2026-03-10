@@ -13,11 +13,12 @@ Design docs in `docs/plans/`.
 ```
 whiteSource (AudioWorklet) ──→ whiteGain ──→ destination
 brownSource (AudioWorklet) ──→ brownGain ──→ destination
-tinnitusOsc (OscillatorNode) ──→ tinnitusGain ──→ destination
-  ↑ frequency modulated by:
-  LFO1 (0.75 Hz, ±50 Hz)
-  LFO2 (1.85 Hz, ±20 Hz)
-  LFO3 (0.28 Hz, ±15 Hz)
+tinnitusOsc × 5 (4414–4652 Hz sines) ──→ perVoiceGain ──→ tinnitusGain ──→ destination
+  ↑ each frequency modulated by:
+  LFO1 (~0.75 Hz, ±70 Hz)  — primary shimmer (rate offset per voice)
+  LFO2 (~1.85 Hz, ±30 Hz)  — fast wobble
+  LFO3 (~0.28 Hz, ±20 Hz)  — slow drift
+  noiseSrc → LPF 2Hz → ±50 Hz  — organic random FM
 oceanSource (AudioWorklet, brown-noise) ──→ lowpass (500 Hz) ──→ oceanWaveGain ──→ oceanGain ──→ destination
   ↑ gain modulated by:
   LFO1 (0.08 Hz, ±0.3)   — main wave crash
@@ -54,6 +55,13 @@ Opacity for each layer is lerped toward its slider target at 0.06/frame.
 - New visual layers: add draw function, opacity state + lerp in `frame()`, add slider
 - Use `createLFO()` helper for any new frequency/parameter modulation
 - Volume always goes through `sliderToGain()` for consistent exponential curve + cap
+
+## Versioning
+
+The version is displayed in the control panel UI via the `.version-label` span (semver format, e.g. `v1.0.0`). Bump the version on every commit/push:
+- **Patch** (v1.0.x): bug fixes, tweaks, styling changes
+- **Minor** (v1.x.0): new features, new audio sources, new visual layers
+- **Major** (vX.0.0): breaking changes, major redesigns
 
 ## Keyboard Shortcuts
 
