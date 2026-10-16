@@ -311,7 +311,7 @@
     <span class="slider-label">Spin</span>
     <input type="range" id="spiral-speed" min="-0.04" max="0.04" step="0.001" value="0.008">
   </div>
-  <span class="version-label">v1.1.0</span>
+  <span class="version-label">v1.1.1</span>
 </div>
 
 <!-- Floating restore button — appears in bottom-right when panel is minimized -->
@@ -954,9 +954,39 @@ const controlsPanel = document.getElementById('controls');
 const minimizeBtn = document.getElementById('minimize-btn');
 const restoreBtn = document.getElementById('restore-btn');
 
+// ── Persist settings across launches ──
+// Browser form restoration only survives a reload of a live tab, not a fresh
+// launch (e.g. iOS discarding the PWA overnight). Save every control to
+// localStorage and restore it before syncing state from the DOM.
+const SETTINGS_KEY = 'whitenoise-settings';
+const persistedSliders = [
+  whiteVolSlider, brownVolSlider, tinnitusVolSlider, oceanVolSlider,
+  staticLevelSlider, particleLevelSlider, spiralLevelSlider, spiralSpeedSlider,
+];
+
+function saveSettings() {
+  const settings = { visualsEnabled: visualsToggle.checked };
+  persistedSliders.forEach((slider) => { settings[slider.id] = slider.value; });
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch {}
+}
+
+function restoreSettings() {
+  let settings;
+  try { settings = JSON.parse(localStorage.getItem(SETTINGS_KEY)); } catch {}
+  if (!settings) return;
+  persistedSliders.forEach((slider) => {
+    if (settings[slider.id] !== undefined) slider.value = settings[slider.id];
+  });
+  if (typeof settings.visualsEnabled === 'boolean') visualsToggle.checked = settings.visualsEnabled;
+}
+
+restoreSettings();
+persistedSliders.forEach((slider) => slider.addEventListener('change', saveSettings));
+visualsToggle.addEventListener('change', saveSettings);
+
 // ── Sync state from DOM on load ──
-// Browsers restore slider values from autocomplete on reload, but state
-// still has hardcoded defaults. Read the actual DOM values so everything matches.
+// Settings were just restored into the DOM above (or left at the browser's
+// autocomplete/HTML defaults). Read the actual DOM values so state matches.
 state.whiteVolume = parseFloat(whiteVolSlider.value);
 state.brownVolume = parseFloat(brownVolSlider.value);
 state.tinnitusVolume = parseFloat(tinnitusVolSlider.value);
